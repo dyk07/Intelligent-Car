@@ -18,8 +18,8 @@ def print_track_status():
     if left > right:
         print("-> 偏左")
     elif right > left:
-        print("-> 偏右")
-    else:
+        print("-> 偏右") 
+    else: 
         if vals[2] == 1:
             print("-> 居中黑线")
         else:

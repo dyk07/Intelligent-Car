@@ -8,7 +8,7 @@ uart = UART(2, baudrate=115200, tx=16, rx=17)
 SERVO_DIR = "003"
 SERVO_CENTER = 1500
 SERVO_LEFT = 1080
-SERVO_RIGHT = 1920
+SERVO_RIGHT = 2160
 
 
 def send_cmd(dev_id, pwm, t=0):
