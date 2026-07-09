@@ -10,7 +10,7 @@ SERVO_DIR = "003"
 
 # Speed Calibration
 MOTOR_STOP = 1500
-FORWARD_L = 2000   
+FORWARD_L = 2000
 BACKWARD_L = 1200
 FORWARD_R = 1000
 BACKWARD_R = 1800
@@ -21,7 +21,7 @@ TURN_SPEED_R = 1200
 # Servo Calibration
 SERVO_CENTER = 1500
 SERVO_LEFT   = 1000
-SERVO_RIGHT  = 2100
+SERVO_RIGHT  = 2200
 
 # Track Sensors (L0, L1, Center, R1, R2)
 TRACK_PINS = [47, 48, 39, 40, 4]
@@ -85,11 +85,6 @@ def handle_intersection():
     CROSS_CNT += 1
     stop()
     time.sleep(1.5)  # Exact rules compliance
-    
-    # Drive forward slightly to clear the current cross completely
-    set_servo(SERVO_CENTER)
-    motor(FORWARD_L, FORWARD_R)
-    time.sleep_ms(350) 
 
 def bypass_obstacle():
     """Bypasses A4 boards safely and targets re-acquiring the line."""
@@ -131,16 +126,21 @@ def run():
     CROSS_WINDOW_MS = 60
     
     last_high_density_time = 0
-    HIGH_DENSITY_WINDOW_MS = 100 
+    HIGH_DENSITY_WINDOW_MS = 80
     
     last_intersection_time = 0
     IMMUNITY_DURATION_MS = 1000  
-    KEEP_ERROR_THRESHOLD = 350
-    should_lock_motion = False    
     
-    saved_servo_pwm = SERVO_CENTER
-    saved_motor_l = MOTOR_STOP
-    saved_motor_r = MOTOR_STOP
+    # --- Turning Mode Variables ---
+    turning = False
+    has_turned = False              # Interlock flag to enforce a single execution limit
+    is_turning_right = False
+    right_turn_start_time = 0
+    locked_servo = SERVO_RIGHT
+    locked_motor_l = 2000
+    locked_motor_r = 1700
+    waiting_to_cancel_turning = False
+    intersection_cleared_time = 0
     
     cnt = 0
     loop_counter = 0
@@ -149,15 +149,22 @@ def run():
     current_motor_l = FORWARD_L
     current_motor_r = FORWARD_R
     
-    ERROR_WINDOW_SIZE = 4  # Number of past frames to average (try 3 to 7)
+    ERROR_WINDOW_SIZE = 2  # Number of past frames to average (try 3 to 7)
     error_history = []
-    ACT_WINDOW_SIZE = 4
+    ACT_WINDOW_SIZE = 2
     active_num = []
 
     while True:
         loop_counter += 1
         current_time = time.ticks_ms()
         
+        # Check if we need to exit turning mode after 800ms from intersection restart
+        if waiting_to_cancel_turning and time.ticks_diff(current_time, intersection_cleared_time) > 2500:
+            turning = False
+            waiting_to_cancel_turning = False
+            is_turning_right = False
+            print("=== TURNING MODE: Cancelled, resuming normal tracking ===")
+
         # Ultrasonic pacing
         """if loop_counter % 4 == 0:
             if get_distance() < obstacle_threshold:
@@ -170,13 +177,15 @@ def run():
         active_num.append(sum(vals))
         if len(active_num) > ACT_WINDOW_SIZE:
             active_num.pop(0)
+            
+        active_density = sum(active_num) / len(active_num) if len(active_num) > 0 else 0
         
         if vals[0] == 1:
             last_left_wing_time = current_time
         if vals[4] == 1:
             last_right_wing_time = current_time
 
-        if sum(active_num)/len(active_num) > 3.5:
+        if active_density >= 2.5:
             last_high_density_time = current_time
 
         time_since_last_cross = time.ticks_diff(current_time, last_intersection_time)
@@ -187,19 +196,24 @@ def run():
         broad_hit_recently = (time.ticks_diff(current_time, last_high_density_time) < HIGH_DENSITY_WINDOW_MS)
 
         # Intersection processing
-        if time_since_last_cross > IMMUNITY_DURATION_MS:
+        if turning and not waiting_to_cancel_turning:
+            if active_density >= 2.5:
+                print("=== TURNING MODE: Intersection detected (density >= 3) ===")
+                handle_intersection()
+                in_intersection = True
+                intersection_cleared_time = time.ticks_ms()
+                waiting_to_cancel_turning = True
+                
+                last_intersection_time = time.ticks_ms() 
+                last_left_wing_time = 0
+                last_right_wing_time = 0
+                last_high_density_time = 0
+                cnt = 0 
+                continue
+        elif time_since_last_cross > IMMUNITY_DURATION_MS:
             if (left_hit_recently and right_hit_recently and time_diff < CROSS_WINDOW_MS) or broad_hit_recently:
                 if not in_intersection:
-                    saved_servo_pwm = current_servo
-                    saved_motor_l = current_motor_l
-                    saved_motor_r = current_motor_r
-                    
-                    if abs(sum(active_num) / len(active_num)) >= KEEP_ERROR_THRESHOLD:
-                        should_lock_motion = True
-                        print("=== SWERVING DETECTED: Locking motion state ===")
-                    else:
-                        should_lock_motion = False
-                        print("=== RUNNING STRAIGHT: Normal tracking active ===")
+                    print("=== INTERSECTION DETECTED: Pausing for 1.5 seconds ===")
                     
                     handle_intersection()
                     in_intersection = True
@@ -211,28 +225,31 @@ def run():
                     cnt = 0 
                 continue
             else:
-                if sum(active_num)/len(active_num) <= 2 and vals[0] == 0 and vals[4] == 0:
+                if active_density <= 2 and vals[0] == 0 and vals[4] == 0:
                     in_intersection = False
         else:
             in_intersection = False
 
         # --- EXECUTION ENGINE ---
-        if time_since_last_cross <= IMMUNITY_DURATION_MS and should_lock_motion:
-            set_servo(saved_servo_pwm)
-            motor(saved_motor_l, saved_motor_r)
-            current_servo = saved_servo_pwm
-            current_motor_l = saved_motor_l
-            current_motor_r = saved_motor_r
+        if turning:
+            # Execute the forced continuous right turn
+            set_servo(locked_servo)
+            motor(locked_motor_l, locked_motor_r)
+            current_servo = locked_servo
+            current_motor_l = locked_motor_l
+            current_motor_r = locked_motor_r
         else:
             """if CROSS_CNT >= 7:
                 stop()
                 break"""
                 
-            if sum(active_num) / len(active_num) >= 1:
-                print(sum(active_num) / len(active_num), "tracking")
+            current_is_turning_right = False
+                
+            if active_density >= 1:
+                print(active_density, "tracking")
                 cnt = 0
-                weights = [-2, -1, 0, 1, 2]
-                raw_error = sum(v * w for v, w in zip(vals, weights)) / (sum(active_num) / len(active_num))
+                weights = [-2, -1, 0, 1.2, 2]
+                raw_error = sum(v * w for v, w in zip(vals, weights)) / active_density
                 
                 # Update the moving average buffer
                 error_history.append(raw_error)
@@ -243,8 +260,7 @@ def run():
                 avg_error = sum(error_history) / len(error_history)
                 
                 # Use avg_error for steering calculation
-                current_servo = SERVO_CENTER - int(avg_error * 280)
-                set_servo(current_servo)
+                current_servo = SERVO_CENTER - int(avg_error * 250)
                 
                 # Use avg_error for motor turning decisions
                 if avg_error < -0.4:
@@ -255,14 +271,13 @@ def run():
                     current_motor_l = FORWARD_L
                     current_motor_r = TURN_SPEED_R
                     last_direction = 1
+                    current_is_turning_right = True # Mark as turning right
                 else:
                     current_motor_l = FORWARD_L
                     current_motor_r = FORWARD_R
                     if time_since_last_cross > IMMUNITY_DURATION_MS:
                         last_direction = 0
                     
-                motor(current_motor_l, current_motor_r)
-                
             else:
                 if len(error_history) > 0:
                     history_mean = sum(error_history) / len(error_history)
@@ -277,28 +292,47 @@ def run():
                     # Clear the history now that we've extracted its directional value
                     error_history.clear()
                 
-                if cnt >= 4:
-                    print(sum(active_num) / len(active_num), "forcing right")
+                if cnt >= 20 :
+                    print(active_density, "forcing right")
                     current_servo = SERVO_RIGHT + 100
                     current_motor_l = 2000
                     current_motor_r = 1300
+                    current_is_turning_right = True # Mark as forcing right
                 else:   
                     if last_direction == -1:
-                        print(sum(active_num) / len(active_num), "trying right")
+                        print(active_density, "trying right")
                         current_servo = SERVO_RIGHT - 100
                         current_motor_l = FORWARD_L
                         current_motor_r = TURN_SPEED_R
                         cnt += 1
+                        current_is_turning_right = True # Mark as trying right
                     elif last_direction == 1:
-                        print(sum(active_num) / len(active_num), "trying left")
+                        print(active_density, "trying left")
                         current_servo = SERVO_LEFT + 100
                         current_motor_l = FORWARD_L
                         current_motor_r = TURN_SPEED_R
                         cnt += 1
+            
+            # --- Continuous Right Turn Timer Update ---
+            # Added "not has_turned" condition to lock out future entries
+            if current_is_turning_right and not has_turned:
+                if not is_turning_right:
+                    is_turning_right = True
+                    right_turn_start_time = current_time
+                # Check if it has been turning right for over 1 second (500 ms constraint preserved from your file)
+                elif time.ticks_diff(current_time, right_turn_start_time) > 500 and not turning and CROSS_CNT >= 3:
+                    turning = True
+                    has_turned = True # Set flag so it can never be reactivated later
+                    # Force a continuous right turn instead of freezing current values
+                    locked_servo = SERVO_RIGHT + 100
+                    locked_motor_l = FORWARD_L
+                    locked_motor_r = TURN_SPEED_R
+                    print("=== TURNING MODE: Activated! Forcing continuous right turn (Single-use ONLY) ===")
+            else:
+                is_turning_right = False
                     
-                    
-                set_servo(current_servo)
-                motor(current_motor_l, current_motor_r)
+            set_servo(current_servo)
+            motor(current_motor_l, current_motor_r)
 
         time.sleep_ms(10)
 
