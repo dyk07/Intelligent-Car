@@ -1,6 +1,6 @@
 import time
 from machine import Pin
-import run
+import run_B as run # choose from [run_A, run_B] 
 
 # Configure the BOOT button (GPIO 0)
 boot_button = Pin(0, Pin.IN, Pin.PULL_UP)

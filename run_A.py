@@ -1,19 +1,20 @@
+#track only
 from machine import UART, Pin, time_pulse_us
 import time
 
 # ===== Hardware Configuration =====
 uart = UART(2, baudrate=115200, tx=16, rx=17)
 
-MOTOR_L = "001"
-MOTOR_R = "002"
+MOTOR_L = "002"
+MOTOR_R = "001"
 SERVO_DIR = "003"
 
 # Speed Calibration
 MOTOR_STOP = 1500
-FORWARD_L = 2100
-BACKWARD_L = 1000
-FORWARD_R = 900
-BACKWARD_R = 2000
+FORWARD_L = 2000
+BACKWARD_L = 1200
+FORWARD_R = 1000
+BACKWARD_R = 1800
 # Right motor is physically reversed
 TURN_SPEED_L = 1800
 TURN_SPEED_R = 1200
@@ -90,26 +91,17 @@ def bypass_obstacle():
     """Bypasses A4 boards safely and targets re-acquiring the line."""
     print("=== OBSTACLE IN PATH: Commencing Maneuver ===")
     
+    # Step 1: Arc Left around the obstacle
+    set_servo(SERVO_LEFT)
+    motor(FORWARD_L, FORWARD_R)
+    time.sleep_ms(700)
+    
+    # Step 2: Straighten past it
     set_servo(SERVO_CENTER)
-    motor(BACKWARD_L, BACKWARD_R)
-    time.sleep_ms(500)
+    time.sleep_ms(600)
     
+    # Step 3: Arc Right back toward the path until line is detected
     set_servo(SERVO_RIGHT)
-    motor(FORWARD_L, TURN_SPEED_R)
-    time.sleep_ms(1400)
-
-    set_servo(SERVO_LEFT)
-    motor(TURN_SPEED_L, FORWARD_R)
-    time.sleep_ms(1100)
-    
-    set_servo(SERVO_LEFT)
-    motor(TURN_SPEED_L, FORWARD_R)
-    time.sleep_ms(1100)
-    
-    set_servo(SERVO_RIGHT)
-    motor(FORWARD_L, TURN_SPEED_R)
-    time.sleep_ms(1400)
-    
     timeout = time.ticks_add(time.ticks_ms(), 3500)
     
     while time.ticks_diff(timeout, time.ticks_ms()) > 0:
@@ -128,7 +120,7 @@ def run():
     
     last_direction = 0   
     in_intersection = False
-    obstacle_threshold = 30.0 
+    obstacle_threshold = 20.0 
     
     last_left_wing_time = 0
     last_right_wing_time = 0
@@ -175,12 +167,12 @@ def run():
             print("=== TURNING MODE: Cancelled, resuming normal tracking ===")
 
         # Ultrasonic pacing
-        if loop_counter % 4 == 0:
+        """if loop_counter % 4 == 0:
             if get_distance() < obstacle_threshold:
                 stop()
                 time.sleep_ms(200)
                 bypass_obstacle()
-                continue
+                continue"""
 
         vals = read_track()
         active_num.append(sum(vals))
