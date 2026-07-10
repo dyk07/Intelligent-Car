@@ -93,23 +93,19 @@ def bypass_obstacle():
     
     set_servo(SERVO_CENTER)
     motor(BACKWARD_L, BACKWARD_R)
-    time.sleep_ms(500)
+    time.sleep_ms(900)
     
     set_servo(SERVO_RIGHT)
     motor(FORWARD_L, TURN_SPEED_R)
-    time.sleep_ms(1400)
+    time.sleep_ms(1100)
 
-    set_servo(SERVO_LEFT)
+    set_servo(SERVO_LEFT + 100)
     motor(TURN_SPEED_L, FORWARD_R)
-    time.sleep_ms(1100)
-    
-    set_servo(SERVO_LEFT)
-    motor(TURN_SPEED_L, FORWARD_R)
-    time.sleep_ms(1100)
-    
+    time.sleep_ms(2200)
     set_servo(SERVO_RIGHT)
+    
     motor(FORWARD_L, TURN_SPEED_R)
-    time.sleep_ms(1400)
+    time.sleep_ms(1000)
     
     timeout = time.ticks_add(time.ticks_ms(), 3500)
     
